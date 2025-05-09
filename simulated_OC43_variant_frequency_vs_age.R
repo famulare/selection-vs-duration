@@ -9,6 +9,9 @@
 #' urlcolor: blue
 #' ---
 #' 
+#+ echo=FALSE, message=FALSE
+knitr::opts_chunk$set(fig.width=4, fig.height=3, fig.align = 'center')
+#' 
 #' This is a quick simulation experiment to demonstrate a hypothesis for a very interesting observation
 #' in [Frida Belinky's](https://www.ncbi.nlm.nih.gov/research/staff/Fbelinky/) talk at Dynamics and Evolution of Viruses titled: 
 #' *Unveiling novel hCoV-OC43 genotypes: the hidden world of intra-host evolution*.
@@ -35,7 +38,7 @@
 #' - Third, I define a Wright-Fisher model for a single amino acid. I picked parameters that are 
 #' coronavirus-like 
 #'     - $Ne~100$, 
-#'     - [$\mu = 8.5e-4$ per site per year](https://www.nature.com/articles/srep11451.pdf), 
+#'     - [$\mu = 8.5\times 10^{-4}$ per site per year](https://www.nature.com/articles/srep11451.pdf), 
 #'     - a [12 hour within-host generation time](https://pmc.ncbi.nlm.nih.gov/articles/PMC8473439/) and 
 #'     - an assumed selection coefficient of $s=0.1$, chosen to look about right and is fixed, independent of any other variable (thus assuming no effect of individual immunity on selection).
 #'  
@@ -47,7 +50,8 @@
 #' 
 #' ## Setting up the simulation
 #' 
-#' To start, let's set up our environment 
+#' To start, let's set up our environment
+#' 
 #+ echo=TRUE, message=FALSE
 library(tidyverse)
 library(ggExtra)
@@ -55,15 +59,14 @@ library(ggExtra)
 set.seed(100) # for reproducibility. comment out to see variation.
 
 #' and define the parameters of the simulation. We start with the two independent components,
-#' shedding duration and the baseline Wright-Fisher model. 
+#' shedding duration and the evolutionary Wright-Fisher model. 
 #' 
 #+ echo=TRUE, message=FALSE
 # lognormal for shedding duration
 log_shedding_duration_median=log(8) # log days
-log_shedding_duration_sd = log(1.3) # log days such that most between 4-15 days
+log_shedding_duration_sd = log(1.2) # log days such that most between 4-15 days
 
 # single amino acid wright fisher
-Ne_median = 100 # median intrahost effective pop size
 mu = 8.5e-4 # mutation rate per site per day
 s = 0.1  # assumed selection coefficient within host
 tau = 1/2 # 12 hour generation time in days
@@ -76,13 +79,16 @@ tau = 1/2 # 12 hour generation time in days
 #' In real biology, this relationship is mediated by a mix of random chance/host factors and prior immunity, and is further overdispersed by the weak correlation between qPCR and reproductive effective population size. 
 
 # Ne, duration correlation model
+Ne_median = 100 # median intrahost effective pop size
 rho_Ne_dur=0.7   # guess that feels about right given data I've seen across pathogens over the years
 log_sd_Ne_dur = 0.4  # let Ne vary from 50 to 500ish around median 100 
 
 #' Finally, we set up the model of correlation between age and shedding duration. This is just cooked up to show the phenomenon, but isn't particularly realistic about how narrow the age of first infection should be on average. 
 # age, duration correlation model
-rho_age_dur = -0.5   # negative correlation between age and shedding duration
-range_age_dur = 30 # years 
+rho_age_duration = -0.2   # negative correlation between age and shedding duration
+# peak age ~10yrs, range out to ~60yrs
+age_scale = 100
+age_recurve_exponent = 5
 
 #' ## Running the model
 #' Now that we've set up the population, their (unobserved) shedding durations, (unobserved) sampling time relative to the start of their infection, and observed $Ne$ and ages, we can run the simulation and sample variant frequencies at the amino acid site of interest for each person.
@@ -104,42 +110,42 @@ sim_data = data.frame(id=1:N_people,
                     log_sd_Ne_dur*sqrt(1-rho_Ne_dur^2)*rnorm(N_people))) |>
   
   # sample ages correlated with shedding duration
-  mutate(age =  range_age_dur*rho_age_dur*pnorm(scale(shedding_duration)) + 
-           range_age_dur*sqrt(1-rho_age_dur^2)*exp(runif(nrow(sim_data)))) |>
-  mutate(age = age - min(age)) # shift age to be >0 because this is a crappy model
+  # pretty bizarre model I made up because it works, and I'm in the middle of a conference.
+  mutate(age =  age_scale*(pnorm(rho_age_duration*(scale(log(shedding_duration))) +
+           sqrt(1-rho_age_duration^2)*exp(-runif(N_people))))^age_recurve_exponent)
 
 
 #' Here's what these attributes look like. The correlations are shown by the scatter plots, and the marginal distributions are on the relevant axes. These are chosen to look coronavirus-like, but could be fit to data and better referenced to the literature to be more realistic. 
 #' 
 #' First, we have the unobserved association between shedding duration and effective population size (a proxy for viral load).
-#+ shedding_duration_vs_log10Ne, echo=TRUE, message=FALSE
+#+ shedding_duration_vs_log10Ne, echo=FALSE, message=FALSE
 p =ggplot(sim_data,aes(x=shedding_duration,y=log10(Ne))) + 
   geom_point() + geom_smooth(method='loess') + theme_bw()  +
-  ylab('shedding duration')
+  xlab('shedding duration')
 ggMarginal(p, type = 'histogram')
 
-#' Then, the unobserved association between sampling time and shedding duration. This shows the assumption that when randomly sampling people and finding them positive, sampling times will on average be later in the infection when shedding duration is longer. This is simply survival bias.
-#+ shedding_duration_vs_sampling_time, echo=TRUE, message=FALSE
+#' Second, the unobserved association between sampling time and shedding duration. This shows the assumption that when randomly sampling people and finding them positive, sampling times will on average be later in the infection when shedding duration is longer. This is simply survival bias.
+#+ shedding_duration_vs_sampling_time, echo=FALSE, message=FALSE
 p =ggplot(sim_data,aes(x=shedding_duration,y=sampling_time)) + 
   geom_point() + geom_smooth(method='loess') + theme_bw() +
-  ylab('shedding duration') + xlab('sampling time')
+  xlab('shedding duration') + ylab('sampling time')
 ggMarginal(p, type = 'histogram')
 
 #' Third is the assumed correlation of shedding duration with age. This is a simple model of how shedding duration tends to be longer when prior immunity is lower. This is not observed in a cross-sectional single sample, but is known to be nearly universal among viral pathogens when individuals are followed longitudinally or following known exposures in contact tracing. 
-#+ shedding_duration_vs_age, echo=TRUE, message=FALSE
+#+ shedding_duration_vs_age, echo=FALSE, message=FALSE
 p=ggplot(sim_data,aes(y=shedding_duration,x=age)) + 
   geom_point() + geom_smooth() + theme_bw()  +
   ylab('shedding duration')
 ggMarginal(p, type = 'histogram')
 
-#' And finally, the only observable relationship is age vs viral load. This is a much weaker correlation, as is typical in observational studies. 
-#+ log10Ne_vs_age, echo=TRUE, message=FALSE
+#' And fourth, the only observable relationship is age vs viral load. This is a much weaker correlation, as is typical in observational studies. 
+#+ log10Ne_vs_age, echo=FALSE, message=FALSE
 p=ggplot(sim_data,aes(x=age,y=log10(Ne))) +
   geom_point() +
   geom_smooth() + theme_bw()
 ggMarginal(p, type = 'histogram')
 
-#' Last, let's run the model to sample people and their observed variant freqencies at the time of sampling.
+#' Finally, let's run the model to sample people and their observed variant freqencies at the time of sampling.
 ## simulate variant fraction at the sampling time and at the amino acid of interest for each person
 for (k in 1:N_people){
   tmp_var_count=0
@@ -161,7 +167,7 @@ for (k in 1:N_people){
 #' ## Results
 #' 
 #' By design, the strongest correlation is with the sampling time during an infection. The later in the infection the virus is sampled, the higher the variant frequency on average. This isn't interesting, but it is a demonstration that the model does what it's supposed to. 
-#+ sampling_time_vs_var_freq, echo=TRUE, message=FALSE
+#+ sampling_time_vs_var_freq, echo=FALSE, message=FALSE
 p=ggplot(sim_data,aes(x=sampling_time,y=var_freq)) +
   geom_point() +
   geom_smooth(method='loess') + 
@@ -170,7 +176,7 @@ p=ggplot(sim_data,aes(x=sampling_time,y=var_freq)) +
   ylab('variant frequency') + xlab('sampling time')
 ggMarginal(p, type = 'histogram')
 
-# #+ shedding_duration_vs_var_freq, echo=TRUE, message=FALSE
+# #+ shedding_duration_vs_var_freq, echo=FALSE, message=FALSE
 # p=ggplot(sim_data,aes(x=shedding_duration,y=var_freq)) +
 #   geom_point() +
 #   geom_smooth(method='loess') + 
@@ -180,7 +186,7 @@ ggMarginal(p, type = 'histogram')
 # ggMarginal(p, type = 'histogram')
 
 #' In contrast, the correlation with viral load is much weaker. While it is strictly a positive correlation by assumption (Ne is assumed correlated with shedding duration, which is correlated with sampling time), selection rate is less sensitive to viral load than the time that selection has been allowed to operate before sampling. 
-#+ log10Ne_vs_var_freq, echo=TRUE, message=FALSE
+#+ log10Ne_vs_var_freq, echo=FALSE, message=FALSE
 p=ggplot(sim_data,aes(x=log10(Ne),y=var_freq)) +
   geom_point() +
   geom_smooth(method='loess') +
@@ -195,14 +201,14 @@ ggMarginal(p, type = 'histogram')
 #' And finally, let's look at how the association of shedding duration and age induces a superficially paradoxical pattern that selection appears to be stronger in younger children. 
 #' 
 #' First, we look at variant fraction vs age.
-#+ var_freq_vs_age, echo=TRUE, message=FALSE
+#+ var_freq_vs_age, echo=FALSE, message=FALSE
 ggplot(sim_data,aes(x=age,y=var_freq)) +
   geom_point() +
   geom_smooth(method='loess') +
   ylab('variant frequency') + theme_bw()
 
 #' and here is consensus sequence variant vs age.
-#+ consensus_variant_vs_age, echo=TRUE, message=FALSE
+#+ consensus_variant_vs_age, echo=FALSE, message=FALSE
 ggplot(sim_data,aes(x=age,y=as.numeric(var_freq>0.5))) +
   geom_point() +
   geom_smooth(method='loess') +
